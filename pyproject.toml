@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nonebot-plugin-recall-record"
+version = "0.1.0"
+description = "NoneBot2 QQ recall record plugin with @bot query and merged-forward history."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "suink", email = "xilei0804@qq.com" }
+]
+keywords = [
+  "nonebot",
+  "nonebot2",
+  "qq",
+  "onebot",
+  "onebot-v11",
+  "napcat",
+  "lagrange",
+  "anti-recall",
+  "antirecall",
+  "recall",
+  "withdraw",
+  "revoke",
+  "防撤回",
+  "撤回记录",
+  "QQ防撤回",
+  "撤回消息",
+  "撤回记录",
+  "合并转发",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: AsyncIO",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Communications :: Chat",
+]
+dependencies = [
+  "nonebot2>=2.2,<3",
+  "nonebot-adapter-onebot>=2.2,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2",
+  "pytest>=8",
+  "ruff>=0.6",
+  "twine>=5",
+]
+
+[project.urls]
+Homepage = "https://github.com/suink/nonebot-plugin-recall-record"
+Repository = "https://github.com/suink/nonebot-plugin-recall-record"
+Issues = "https://github.com/suink/nonebot-plugin-recall-record/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nonebot_plugin_recall_record"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
