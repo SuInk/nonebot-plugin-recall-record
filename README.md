@@ -2,9 +2,9 @@
 
 NoneBot2 撤回记录插件，适配 OneBot v11，兼容 NapCat、Lagrange、LLOneBot 等常见 QQ 机器人实现。关键词：NoneBot 防撤回、QQ 防撤回、群撤回记录、撤回消息查询、OneBot v11 防撤回、合并转发撤回消息。
 
-插件默认是 **触发式撤回记录查询**：平时只缓存群聊消息和撤回事件，不会在有人撤回时立刻刷屏。群里 `@机器人 最近撤回消息`、`@机器人 查撤回` 或 `@机器人 防撤回` 时，机器人会把最近 24 小时记录到的所有撤回消息通过合并转发发出来。
+插件默认是 **触发式撤回记录查询**：平时会缓存并落盘保存群聊消息元数据和撤回事件，不会在有人撤回时立刻刷屏。群里 `@机器人 最近撤回消息`、`@机器人 查撤回` 或 `@机器人 防撤回` 时，机器人会把最近 24 小时记录到的所有撤回消息通过合并转发发出来。
 
-默认会尽量在合并转发里还原图片、QQ 表情和动画表情；语音、视频、文件只有在 OneBot 消息段能确认小于 10MB 时才尝试重发，过大或无法确认大小会降级为 `[视频]`、`[语音]`、`[文件:name]` 等文本摘要。插件不下载媒体、不落盘、不缓存二进制内容，只保存 OneBot 消息段元数据。
+默认会尽量在合并转发里还原图片、QQ 表情和动画表情；语音、视频、文件只有在 OneBot 消息段能确认小于 10MB 时才尝试重发，过大或无法确认大小会降级为 `[视频]`、`[语音]`、`[文件:name]` 等文本摘要。插件会把聊天记录元数据写入 SQLite，重启后仍可查询；但不会下载媒体、不保存图片/视频/文件二进制内容，只保存 OneBot 消息段元数据。
 
 ## 特性
 
@@ -13,7 +13,8 @@ NoneBot2 撤回记录插件，适配 OneBot v11，兼容 NapCat、Lagrange、LLO
 - 使用 OneBot `send_group_forward_msg` 合并转发撤回记录。
 - 支持文字、@、表情、图片、语音、视频、文件等常见消息段的缓存和降级展示。
 - 默认尽量还原图片、QQ 表情、动画表情；小于 10MB 的语音、视频、文件会尝试重发。
-- 不下载文件，不写入磁盘，只缓存消息段元数据；缓存按数量上限和 TTL 在正常事件触发时清理。
+- 默认使用 SQLite 持久化消息段元数据和撤回记录，机器人重启后也能查询。
+- 不下载文件，不保存媒体二进制；落盘数据按数量上限和 TTL 在正常事件触发时清理。
 - 支持群白名单、群黑名单、用户排除名单。
 - 可切换为自动补发模式，或同时启用自动补发和触发式查询。
 
@@ -63,6 +64,9 @@ nonebot.load_plugin("nonebot_plugin_recall_record")
 | `RECALL_RECORD_RECALL_CACHE_SIZE` | `500` | 每个群缓存的撤回记录数量 |
 | `RECALL_RECORD_CACHE_TTL_SECONDS` | `86400` | 原消息缓存保留秒数；过期数据会在新消息、撤回、查询时清理 |
 | `RECALL_RECORD_QUERY_WINDOW_SECONDS` | `86400` | 查询最近多少秒的撤回记录，默认 24 小时 |
+| `RECALL_RECORD_PERSIST` | `true` | 是否启用 SQLite 持久化，启用后重启不丢撤回记录 |
+| `RECALL_RECORD_STORAGE_PATH` | `data/nonebot_plugin_recall_record/recall_record.sqlite3` | SQLite 数据库路径 |
+| `RECALL_RECORD_STORAGE_TTL_SECONDS` | `604800` | 落盘记录最长保留秒数，默认 7 天 |
 | `RECALL_RECORD_QUERY_KEYWORDS` | `撤回,防撤回,查撤回,最近撤回,撤回消息,撤回记录,recall,anti-recall` | @ 机器人时触发查询的关键词 |
 | `RECALL_RECORD_FORWARD_LIMIT` | `0` | 合并转发最大记录数；`0` 表示不限制 |
 | `RECALL_RECORD_MAX_FIELD_CHARS` | `4096` | 单个消息段字段最多保留多少字符，防止异常大字段占用内存 |
@@ -89,6 +93,7 @@ RECALL_RECORD_MODE=query
 RECALL_RECORD_GROUPS=123456, 234567
 RECALL_RECORD_EXCLUDE_USERS=10000 10001
 RECALL_RECORD_QUERY_WINDOW_SECONDS=86400
+RECALL_RECORD_STORAGE_TTL_SECONDS=604800
 RECALL_RECORD_QUERY_KEYWORDS=撤回,查撤回,最近撤回,recall
 RECALL_RECORD_MAX_MEDIA_BYTES=10MB
 ```
@@ -112,7 +117,7 @@ RECALL_RECORD_MODE=both
 
 ## 媒体与空间占用
 
-插件没有媒体下载逻辑，也没有本地文件缓存目录。撤回记录保存在进程内存里，内容是消息 ID、发送者、撤回时间和 OneBot 消息段元数据。为了避免异常大的消息段字段占用内存，单个字段默认最多保留 4096 字符，可通过 `RECALL_RECORD_MAX_FIELD_CHARS` 调整。
+插件没有媒体下载逻辑，也没有本地文件缓存目录。撤回记录默认写入 SQLite，内容是消息 ID、发送者、撤回时间、文本和 OneBot 消息段元数据；图片、视频、语音、文件只保存 OneBot 提供的 `url` / `file` / `summary` / `size` 等字段，不保存二进制内容。为了避免异常大的消息段字段占用内存和磁盘，单个字段默认最多保留 4096 字符，可通过 `RECALL_RECORD_MAX_FIELD_CHARS` 调整。
 
 默认配置下：
 
@@ -121,15 +126,15 @@ RECALL_RECORD_MODE=both
 - 无法确认大小的语音、视频、文件默认降级为文本摘要，避免误拉取大文件；如果你愿意承担带宽和耗时，可以设置 `RECALL_RECORD_RESEND_UNKNOWN_SIZE_MEDIA=true`。
 - 文件消息能否在合并转发里原样显示取决于 NapCat / Lagrange / LLOneBot 等 OneBot 实现；失败时仍会保留文件名和大小摘要。
 
-缓存不会越来越大：插件按 `RECALL_RECORD_CACHE_SIZE` 限制每个群缓存的原消息数量，按 `RECALL_RECORD_RECALL_CACHE_SIZE` 限制每个群缓存的撤回记录数量，并按 `RECALL_RECORD_CACHE_TTL_SECONDS` / `RECALL_RECORD_QUERY_WINDOW_SECONDS` 在收到新消息、撤回事件或查询时清理过期内存数据。插件不会启动额外的定时清理任务。
+缓存和落盘数据不会无限增长：插件按 `RECALL_RECORD_CACHE_SIZE` 限制每个群缓存/落盘的原消息数量，按 `RECALL_RECORD_RECALL_CACHE_SIZE` 限制每个群缓存/落盘的撤回记录数量，并按 `RECALL_RECORD_CACHE_TTL_SECONDS` / `RECALL_RECORD_QUERY_WINDOW_SECONDS` / `RECALL_RECORD_STORAGE_TTL_SECONDS` 在收到新消息、撤回事件或查询时清理过期数据。插件不会启动额外的定时清理任务。
 
 
 ## 行为说明
 
 - 插件只处理群聊撤回事件，不处理私聊撤回。
-- 插件只能展示启动后缓存到的撤回消息；机器人重启前的消息无法恢复。
+- 插件默认会把启动后收到的消息段元数据和撤回记录写入 SQLite；机器人重启后仍可查询未过期的撤回记录。
 - 默认只响应 `@机器人` 的查询，避免误触发和刷屏。
-- 插件只在内存里保存 OneBot 消息段元数据，不下载、不落盘、不保存图片/视频/文件二进制内容。
+- 插件只保存 OneBot 消息段元数据，不下载、不保存图片/视频/文件二进制内容。
 - 图片、表情、语音、视频、文件能否原样重放取决于 OneBot 实现提供的消息段字段以及资源是否仍可访问，可能消耗额外带宽和发送时间。
 - 语音、视频、文件默认必须能确认小于 10 MiB 才会尝试重放；过大或未知大小会降级为摘要。
 - 如果机器人没有收到原消息事件，合并转发里会显示“未缓存到原消息内容”。

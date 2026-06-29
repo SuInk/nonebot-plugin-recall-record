@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 ReportTarget = Literal["group", "private", "both", "none"]
 WorkMode = Literal["query", "auto", "both"]
 DEFAULT_MAX_MEDIA_BYTES = 10 * 1024 * 1024
+DEFAULT_STORAGE_PATH = "data/nonebot_plugin_recall_record/recall_record.sqlite3"
 
 
 def parse_int_set(value: Any) -> set[int]:
@@ -85,6 +87,9 @@ class Config(BaseModel):
     recall_record_recall_cache_size: int = Field(default=500, ge=1)
     recall_record_cache_ttl_seconds: int = Field(default=86400, ge=1)
     recall_record_query_window_seconds: int = Field(default=86400, ge=1)
+    recall_record_persist: bool = True
+    recall_record_storage_path: str = DEFAULT_STORAGE_PATH
+    recall_record_storage_ttl_seconds: int = Field(default=7 * 86400, ge=1)
     recall_record_query_keywords: tuple[str, ...] = DEFAULT_QUERY_KEYWORDS
     recall_record_max_field_chars: int = Field(default=4096, ge=128)
     recall_record_forward_limit: int = Field(default=0, ge=0)
@@ -116,6 +121,7 @@ class Config(BaseModel):
         }
         bool_fields = {
             "recall_record_enabled": True,
+            "recall_record_persist": True,
             "recall_record_resend_media": True,
             "recall_record_resend_images": True,
             "recall_record_resend_faces": True,
@@ -134,6 +140,8 @@ class Config(BaseModel):
             data.get("recall_record_max_media_bytes"),
             default=DEFAULT_MAX_MEDIA_BYTES,
         )
+        if data.get("recall_record_storage_path"):
+            data["recall_record_storage_path"] = str(Path(data["recall_record_storage_path"]))
         data["recall_record_query_keywords"] = parse_str_tuple(
             data.get("recall_record_query_keywords"),
             default=DEFAULT_QUERY_KEYWORDS,

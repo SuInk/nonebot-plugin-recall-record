@@ -27,6 +27,7 @@ from .render import (
     plain_text_from_message,
     sender_name_from_event,
 )
+from .storage import RecallRecordStorage
 
 __version__ = "0.1.0"
 
@@ -42,6 +43,12 @@ __plugin_meta__ = PluginMetadata(
 
 driver = get_driver()
 plugin_config = Config.from_driver_config(driver.config)
+_storage = RecallRecordStorage(
+    plugin_config.recall_record_storage_path,
+    storage_ttl_seconds=plugin_config.recall_record_storage_ttl_seconds,
+    max_messages=plugin_config.recall_record_cache_size,
+    max_recalls=plugin_config.recall_record_recall_cache_size,
+)
 
 _message_cache: defaultdict[int, dict[int, CachedMessage]] = defaultdict(dict)
 _message_order: defaultdict[int, deque[int]] = defaultdict(deque)
@@ -66,6 +73,18 @@ async def _is_recall_query(event: Event) -> bool:
         return False
     text = _event_plain_text(event).lower()
     return any(keyword.lower() in text for keyword in plugin_config.recall_record_query_keywords)
+
+
+@driver.on_startup
+async def _setup_storage() -> None:
+    if plugin_config.recall_record_persist:
+        _storage.setup()
+        logger.info(f"Recall record storage ready: {_storage.path}")
+
+
+@driver.on_shutdown
+async def _close_storage() -> None:
+    _storage.close()
 
 
 message_cache = on_message(rule=Rule(_is_group_message), priority=1, block=False)
@@ -94,8 +113,10 @@ async def handle_group_message(event: GroupMessageEvent) -> None:
         plain_text=plain_text_from_message(message),
         time=int(getattr(event, "time", time.time()) or time.time()),
     )
-    _message_cache[group_id][message_id] = record
-    _message_order[group_id].append(message_id)
+    _cache_message(record)
+    if plugin_config.recall_record_persist:
+        _storage.save_message(record)
+        _storage.prune()
     _trim_group_cache(group_id)
     _trim_recent_recalls()
 
@@ -120,7 +141,7 @@ async def handle_group_recall(bot: Bot, event: GroupRecallNoticeEvent) -> None:
         return
     _recent_recalls.append(recall_key)
 
-    cached = _message_cache.get(group_id, {}).get(message_id)
+    cached = _get_cached_message(group_id, message_id)
     record = RecallRecord(
         group_id=group_id,
         message_id=message_id,
@@ -129,7 +150,10 @@ async def handle_group_recall(bot: Bot, event: GroupRecallNoticeEvent) -> None:
         recall_time=recall_time,
         cached=cached,
     )
-    _recall_records[group_id].append(record)
+    _cache_recall(record)
+    if plugin_config.recall_record_persist:
+        _storage.save_recall(record)
+        _storage.prune()
     _trim_recall_records(group_id)
 
     if plugin_config.recall_record_mode in {"auto", "both"}:
@@ -242,11 +266,48 @@ def _recent_group_recalls(group_id: int) -> list[RecallRecord]:
     _trim_recent_recalls()
     now = time.time()
     window = plugin_config.recall_record_query_window_seconds
+    if plugin_config.recall_record_persist:
+        persisted_records = _storage.load_recent_recalls(group_id, since=int(now - window))
+        for record in persisted_records:
+            if record.cached is not None:
+                _cache_message(record.cached)
+            _cache_recall(record)
+        _trim_group_cache(group_id)
+        _trim_recall_records(group_id)
     return [
         record
         for record in _recall_records.get(group_id, ())
         if now - record.recall_time <= window
     ]
+
+
+def _cache_message(record: CachedMessage) -> None:
+    _message_cache[record.group_id][record.message_id] = record
+    order = _message_order[record.group_id]
+    if record.message_id not in order:
+        order.append(record.message_id)
+
+
+def _cache_recall(record: RecallRecord) -> None:
+    records = _recall_records[record.group_id]
+    key = (record.message_id, record.recall_time)
+    for existing in records:
+        if (existing.message_id, existing.recall_time) == key:
+            existing.cached = existing.cached or record.cached
+            return
+    records.append(record)
+
+
+def _get_cached_message(group_id: int, message_id: int) -> CachedMessage | None:
+    cached = _message_cache.get(group_id, {}).get(message_id)
+    if cached is not None:
+        return cached
+    if not plugin_config.recall_record_persist:
+        return None
+    cached = _storage.get_message(group_id, message_id)
+    if cached is not None:
+        _cache_message(cached)
+    return cached
 
 
 def _replay_options() -> ReplayOptions:
