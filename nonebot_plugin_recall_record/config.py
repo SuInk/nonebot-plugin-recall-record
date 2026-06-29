@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 ReportTarget = Literal["group", "private", "both", "none"]
 WorkMode = Literal["query", "auto", "both"]
+DEFAULT_MAX_MEDIA_BYTES = 10 * 1024 * 1024
 
 
 def parse_int_set(value: Any) -> set[int]:
@@ -28,6 +29,29 @@ def parse_bool(value: Any, *, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+def parse_byte_size(value: Any, *, default: int) -> int:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip().lower()
+    match = re.search(r"(\d+(?:\.\d+)?)\s*([kmgt]?i?b?|字节)?", text)
+    if not match:
+        return default
+    number = float(match.group(1))
+    unit = (match.group(2) or "").lower()
+    multiplier = 1
+    if unit in {"g", "gb", "gib"}:
+        multiplier = 1024 * 1024 * 1024
+    elif unit in {"m", "mb", "mib"}:
+        multiplier = 1024 * 1024
+    elif unit in {"k", "kb", "kib"}:
+        multiplier = 1024
+    return int(number * multiplier)
 
 
 def parse_str_tuple(value: Any, *, default: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -69,13 +93,21 @@ class Config(BaseModel):
     recall_record_exclude_users: set[int] = Field(default_factory=set)
     recall_record_report_to: ReportTarget = "group"
     recall_record_private_targets: set[int] = Field(default_factory=set)
-    recall_record_resend_media: bool = False
+    recall_record_resend_media: bool = True
+    recall_record_resend_images: bool = True
+    recall_record_resend_faces: bool = True
+    recall_record_resend_records: bool = True
+    recall_record_resend_videos: bool = True
+    recall_record_resend_files: bool = True
+    recall_record_max_media_bytes: int = Field(default=DEFAULT_MAX_MEDIA_BYTES, ge=0)
+    recall_record_resend_unknown_size_media: bool = False
     recall_record_mention_operator: bool = False
     recall_record_show_message_id: bool = False
 
     @classmethod
     def from_driver_config(cls, raw_config: Any) -> Config:
         data = _dump_config(raw_config)
+        _apply_resend_media_switch(data)
         int_set_fields = {
             "recall_record_groups",
             "recall_record_exclude_groups",
@@ -84,7 +116,13 @@ class Config(BaseModel):
         }
         bool_fields = {
             "recall_record_enabled": True,
-            "recall_record_resend_media": False,
+            "recall_record_resend_media": True,
+            "recall_record_resend_images": True,
+            "recall_record_resend_faces": True,
+            "recall_record_resend_records": True,
+            "recall_record_resend_videos": True,
+            "recall_record_resend_files": True,
+            "recall_record_resend_unknown_size_media": False,
             "recall_record_mention_operator": False,
             "recall_record_show_message_id": False,
         }
@@ -92,6 +130,10 @@ class Config(BaseModel):
             data[field] = parse_int_set(data.get(field))
         for field, default in bool_fields.items():
             data[field] = parse_bool(data.get(field), default=default)
+        data["recall_record_max_media_bytes"] = parse_byte_size(
+            data.get("recall_record_max_media_bytes"),
+            default=DEFAULT_MAX_MEDIA_BYTES,
+        )
         data["recall_record_query_keywords"] = parse_str_tuple(
             data.get("recall_record_query_keywords"),
             default=DEFAULT_QUERY_KEYWORDS,
@@ -124,6 +166,19 @@ def _with_legacy_group_antirecall_keys(data: dict[str, Any]) -> dict[str, Any]:
         current_key = current_prefix + key[len(legacy_prefix) :]
         result.setdefault(current_key, value)
     return result
+
+
+def _apply_resend_media_switch(data: dict[str, Any]) -> None:
+    if "recall_record_resend_media" not in data:
+        return
+    for field in (
+        "recall_record_resend_images",
+        "recall_record_resend_faces",
+        "recall_record_resend_records",
+        "recall_record_resend_videos",
+        "recall_record_resend_files",
+    ):
+        data.setdefault(field, data["recall_record_resend_media"])
 
 
 def _model_validate(model: type[Config], data: dict[str, Any]) -> Config:

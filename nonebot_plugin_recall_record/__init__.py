@@ -19,6 +19,7 @@ from .config import Config
 from .render import (
     CachedMessage,
     RecallRecord,
+    ReplayOptions,
     build_empty_query_message,
     build_forward_fallback,
     build_recall_forward_content,
@@ -96,6 +97,7 @@ async def handle_group_message(event: GroupMessageEvent) -> None:
     _message_cache[group_id][message_id] = record
     _message_order[group_id].append(message_id)
     _trim_group_cache(group_id)
+    _trim_recent_recalls()
 
 
 @group_recall.handle()
@@ -110,8 +112,10 @@ async def handle_group_recall(bot: Bot, event: GroupRecallNoticeEvent) -> None:
     if not _group_enabled(group_id) or user_id in plugin_config.recall_record_exclude_users:
         return
 
+    _trim_group_cache(group_id)
     recall_time = int(getattr(event, "time", time.time()) or time.time())
     recall_key = (group_id, message_id, recall_time)
+    _trim_recent_recalls()
     if recall_key in _recent_recalls:
         return
     _recent_recalls.append(recall_key)
@@ -183,7 +187,7 @@ async def _send_auto_notice(bot: Bot, record: RecallRecord) -> None:
     }
     notice = build_recall_notice(
         record.cached,
-        resend_media=plugin_config.recall_record_resend_media,
+        replay_options=_replay_options(),
         **notice_kwargs,
     )
     fallback_notice = build_recall_notice(record.cached, resend_media=False, **notice_kwargs)
@@ -223,7 +227,7 @@ def _build_forward_node(record: RecallRecord, index: int):
         record,
         index=index,
         show_message_id=plugin_config.recall_record_show_message_id,
-        resend_media=plugin_config.recall_record_resend_media,
+        replay_options=_replay_options(),
     )
     return MessageSegment.node_custom(
         user_id=record.user_id,
@@ -233,7 +237,9 @@ def _build_forward_node(record: RecallRecord, index: int):
 
 
 def _recent_group_recalls(group_id: int) -> list[RecallRecord]:
+    _trim_group_cache(group_id)
     _trim_recall_records(group_id)
+    _trim_recent_recalls()
     now = time.time()
     window = plugin_config.recall_record_query_window_seconds
     return [
@@ -241,6 +247,18 @@ def _recent_group_recalls(group_id: int) -> list[RecallRecord]:
         for record in _recall_records.get(group_id, ())
         if now - record.recall_time <= window
     ]
+
+
+def _replay_options() -> ReplayOptions:
+    return ReplayOptions(
+        resend_images=plugin_config.recall_record_resend_images,
+        resend_faces=plugin_config.recall_record_resend_faces,
+        resend_records=plugin_config.recall_record_resend_records,
+        resend_videos=plugin_config.recall_record_resend_videos,
+        resend_files=plugin_config.recall_record_resend_files,
+        max_media_bytes=plugin_config.recall_record_max_media_bytes,
+        resend_unknown_size_media=plugin_config.recall_record_resend_unknown_size_media,
+    )
 
 
 def _group_enabled(group_id: int) -> bool:
@@ -279,8 +297,10 @@ def _safe_message_copy(message: Message) -> Message:
 
 def _trim_group_cache(group_id: int) -> None:
     now = time.time()
-    cache = _message_cache[group_id]
-    order = _message_order[group_id]
+    cache = _message_cache.get(group_id)
+    order = _message_order.get(group_id)
+    if cache is None or order is None:
+        return
 
     while order:
         message_id = order[0]
@@ -310,6 +330,18 @@ def _trim_recall_records(group_id: int) -> None:
         plugin_config.recall_record_query_window_seconds,
         plugin_config.recall_record_cache_ttl_seconds,
     )
-    records = _recall_records[group_id]
+    records = _recall_records.get(group_id)
+    if records is None:
+        return
     while records and now - records[0].recall_time > window:
         records.popleft()
+
+
+def _trim_recent_recalls() -> None:
+    now = time.time()
+    window = max(
+        plugin_config.recall_record_query_window_seconds,
+        plugin_config.recall_record_cache_ttl_seconds,
+    )
+    while _recent_recalls and now - _recent_recalls[0][2] > window:
+        _recent_recalls.popleft()
