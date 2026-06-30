@@ -121,7 +121,7 @@ RECALL_RECORD_MODE=both
 
 默认配置下：
 
-- 图片、QQ 表情、动画表情会尽量放回合并转发节点里；如果 OneBot 实现不支持或资源已失效，会降级为 `[图片]`、`[表情]`、`[动画表情]`。
+- 图片、QQ 表情、动画表情会尽量放回合并转发节点里；动画表情会优先使用消息段里的 `url` / `file` 转成普通图片段发送。如果 OneBot 实现不支持、资源已失效，或原消息段没有可用媒体引用，会降级为 `[图片]`、`[表情]`、`[动画表情]`。
 - 语音、视频、文件只有在消息段里带有 `size` / `file_size` / `filesize` / `fileSize` 且不超过 `RECALL_RECORD_MAX_MEDIA_BYTES` 时才尝试重发。
 - 无法确认大小的语音、视频、文件默认降级为文本摘要，避免误拉取大文件；如果你愿意承担带宽和耗时，可以设置 `RECALL_RECORD_RESEND_UNKNOWN_SIZE_MEDIA=true`。
 - 文件消息能否在合并转发里原样显示取决于 NapCat / Lagrange / LLOneBot 等 OneBot 实现；失败时仍会保留文件名和大小摘要。

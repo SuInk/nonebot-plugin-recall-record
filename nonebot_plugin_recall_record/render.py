@@ -8,7 +8,19 @@ from typing import Any
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 MEDIA_SIZE_KEYS = ("size", "file_size", "filesize", "fileSize")
+FILE_REFERENCE_KEYS = (
+    "url",
+    "file",
+    "path",
+    "file_id",
+    "file_url",
+    "image_url",
+    "thumb_url",
+    "thumbnail",
+    "preview_url",
+)
 EMOJI_SEGMENT_TYPES = {"face", "mface", "marketface", "dice", "rps"}
+IMAGE_EMOJI_SEGMENT_TYPES = {"mface", "marketface"}
 DEFAULT_MAX_MEDIA_BYTES = 10 * 1024 * 1024
 
 
@@ -185,8 +197,9 @@ def build_replay_message(
             continue
         if segment_type in EMOJI_SEGMENT_TYPES:
             if options.resend_faces:
+                emoji_segment = _emoji_replay_segment(segment_type, data, options)
                 flush_text()
-                result.append(_clone_segment(segment_type, data))
+                result.append(emoji_segment)
             else:
                 text_buffer.append(_segment_fallback_text(segment_type, data))
             continue
@@ -266,6 +279,25 @@ def _coerce_replay_options(
     )
 
 
+def _emoji_replay_segment(
+    segment_type: str,
+    data: dict[str, Any],
+    options: ReplayOptions,
+) -> MessageSegment:
+    if segment_type in IMAGE_EMOJI_SEGMENT_TYPES:
+        media_segment = _media_segment(
+            "image",
+            data,
+            options,
+            allow_unknown_size=True,
+            preserve_data=False,
+            allow_id_ref=False,
+        )
+        if media_segment is not None:
+            return media_segment
+    return _clone_segment(segment_type, data)
+
+
 def _replay_media_segment(
     segment_type: str,
     data: dict[str, Any],
@@ -296,14 +328,16 @@ def _media_segment(
     options: ReplayOptions,
     *,
     allow_unknown_size: bool = False,
+    preserve_data: bool = True,
+    allow_id_ref: bool = True,
 ) -> MessageSegment | None:
     if not _within_media_limit(data, options, allow_unknown_size=allow_unknown_size):
         return None
-    file_ref = _file_reference(data)
+    file_ref = _file_reference(data, allow_id_ref=allow_id_ref)
     if not file_ref:
         return None
     if segment_type in {"image", "record", "video", "file"}:
-        if data.get("file"):
+        if preserve_data and data.get("file"):
             return _clone_segment(segment_type, data)
         return MessageSegment(type=segment_type, data={"file": file_ref})
     return None
@@ -321,15 +355,14 @@ def _within_media_limit(
     return size <= options.max_media_bytes
 
 
-def _file_reference(data: dict[str, Any]) -> str:
-    return str(
-        data.get("url")
-        or data.get("file")
-        or data.get("path")
-        or data.get("file_id")
-        or data.get("id")
-        or ""
-    ).strip()
+def _file_reference(data: dict[str, Any], *, allow_id_ref: bool = True) -> str:
+    for key in FILE_REFERENCE_KEYS:
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    if allow_id_ref:
+        return str(data.get("id") or "").strip()
+    return ""
 
 
 def _clone_segment(segment_type: str, data: dict[str, Any]) -> MessageSegment:

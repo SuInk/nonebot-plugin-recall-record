@@ -44,12 +44,24 @@ def test_build_replay_message_preserves_image_and_face_by_default() -> None:
             MessageSegment.image("https://example.com/a.png"),
             MessageSegment(type="face", data={"id": "14"}),
             MessageSegment(type="mface", data={"summary": "[动画表情]", "url": "u"}),
+            MessageSegment(type="marketface", data={"summary": "[动画表情]", "file": "f"}),
         ]
     )
 
     replay = build_replay_message(message)
 
-    assert [segment.type for segment in replay] == ["image", "face", "mface"]
+    assert [segment.type for segment in replay] == ["image", "face", "image", "image"]
+    assert dict(replay[2].data)["file"] == "u"
+    assert dict(replay[3].data)["file"] == "f"
+
+
+def test_build_replay_message_keeps_raw_animated_face_without_media_ref() -> None:
+    message = Message([MessageSegment(type="mface", data={"summary": "[动画表情]"})])
+
+    replay = build_replay_message(message)
+
+    assert [segment.type for segment in replay] == ["mface"]
+
 
 
 def test_build_replay_message_respects_media_size_limit() -> None:
